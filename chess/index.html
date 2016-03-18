@@ -1,0 +1,1193 @@
+<html>
+
+<head>
+	<style>
+		div {
+			padding: 0px;
+			margin: 0px;
+		}
+
+		.board {
+			width: 640px;
+			height: 640px;
+			border: 1px solid #777;
+			position: relative;
+		}
+
+		.square {
+			width: 72px;
+			height: 72px;
+			border: 4px double black;
+			float: left; /*выравнивание по левому краю*/
+			z-index: 1;
+			position: relative;
+		}
+
+		.square:hover {
+			background: #fefefe;
+			/* Цвет фона при наводе курсора*/
+		}
+
+		.figure {
+			margin: 4px 0px 0px 4px;
+			position: relative;
+			z-index: 10;
+		}
+
+		.square_black {
+			background-color: #B2956C;
+		}
+
+		.square_white {
+			background-color: #FFEBB4;
+		}
+
+		.square_highlighted {
+			background-color: #c4e6fd;
+		}
+
+		.figure_highlighted{
+			background-color: #99d3fc;
+		}
+	</style>
+	<script type="text/javascript" src="jquery.min.js"></script>
+	<script type="text/javascript" src="jquery-ui.min.js"></script>
+	<link href="jquery-ui.min.css" rel="stylesheet" />
+
+	<script type="text/javascript">
+	var whiteTurn = true;
+	var lastTurn = {};
+	var eatPawn = {};  // вспомогательная переменная, хранящая информвцию о съеденной на проходе пешке
+    var selected = {}; // словарь
+	var stateHistory = {};	// словарь. ключ - состояние, значение - количество повторений
+	var turnsCount = 0;		// количество ходов, при которых не было совершено ни одно взятие и не ходила ни одна пешка
+	// допустимость рокировок. [белая левая ладья/белая правая ладья/черная левая ладья/черная правая ладья]
+	var castlings = [true,true,true,true];
+
+    $().ready(function(){
+        build();
+        fill();
+		highLightBoard();
+		SaveStateAndCheck();
+
+		$('#ok_btn').click(function (){
+			// обработчик кнопки "ОК" при выборе фигуры, на которую заменяется пешка
+			var choose = $( "input:radio:checked" ).val();
+			var white = lastTurn['figure'].indexOf('white') > -1;
+			$('#'+lastTurn['toY']+'_'+lastTurn['toX']).html('<img src="images/' + choose + '_'+ (white ? 'white' : 'black') +'.png" class="figure" />');
+			$('#'+lastTurn['toY']+'_'+lastTurn['toX']).attr('figure', choose + '_' + (white ? 'white' : 'black'));
+			$('#choose_menu').css('display','none');
+		})
+    });
+	function isItPossibleMove(x0,y0,x1,y1){
+		var x0 = Number(x0);
+		var x1 = Number(x1);
+		var y0 = Number(y0);
+		var y1 = Number(y1);
+		if(x0<0 || y0<0 || x1<0 || y1<0 ||
+			x0>7 || y0>7 || x1>7 || y1>7)
+			return false;
+		// source - откуда (источник)
+		var src = $('#'+y0+'_'+x0);
+		// destination - точка назначения
+		var dest = $('#'+y1+'_'+x1);
+		var attr = src.attr('figure');
+
+		var dy = y1-y0;
+		var dx = x1-x0;
+
+		// split разбивает строку на массив строк с учетом переданного разделителя
+		var type = attr.split('_')[0];
+
+		if(type == undefined)
+			return false;
+
+		// получаем цвет ходящей фигуры: -1 || int>-1
+		var white = attr.indexOf('white') > -1;
+		var destEmpty = dest.attr('figure') == undefined;
+		var destWhite = false;
+
+		if(!destEmpty)
+			destWhite = dest.attr('figure').indexOf('white') > -1;
+
+
+		switch(type){
+			case 'king':
+				if(Math.abs(dx) > 1 || Math.abs(dy) > 1)
+				{
+					if(white){
+						// рокировка
+						// проверяем, что король ходит на 2 клетки в сторону со своей изначальной позиции
+						if(dy == 0 && Math.abs(dx) == 2 && x0 == 4 && y0 == 7){
+							// проверяем текущую позицию короля, возможность рокирования с ладьей, свободность всех клеток на пути движений
+							// белый король рокируется с левой ладьей
+							if(x1 == 2 && $('#7_1').attr('figure') == undefined && $('#7_3').attr('figure') == undefined
+								&& destEmpty && castlings[0]){
+								if(CheckSecureOnMove(4,7,2,7,'white', true) && CheckSecureOnMove(4,7,3,7,'white', true) && !CheckCheck('white')){
+									return true;
+								}
+							}
+
+							// белый король рокируется с правой ладьей
+							if(x1 == 6 && $('#7_5').attr('figure') == undefined && destEmpty && castlings[1]){
+								if(CheckSecureOnMove(4,7,5,7,'white', true) && CheckSecureOnMove(4,7,6,7,'white', true) && !CheckCheck('white')){
+									return true;
+								}
+							}
+						}
+					}
+					else if(!white) {
+						// рокировка
+						// проверяем, что король ходит на 2 клетки в сторону со своей изначальной позиции
+						if(dy == 0 && Math.abs(dx) == 2 && x0 == 4 && y0 == 0){
+							// проверяем текущую позицию короля, возможность рокирования с ладьей, свободность всех клеток на пути движений
+							// черный король рокируется с левой ладьей
+							if(x1 == 2 && $('#0_1').attr('figure') == undefined && $('#0_3').attr('figure') == undefined
+								&& destEmpty && castlings[2]){
+								if(CheckSecureOnMove(4,0,2,0,'black', true) && CheckSecureOnMove(4,0,3,0,'black', true) && (!CheckCheck('black'))){
+									return true;
+								}
+							}
+
+							// черный король рокируется с правой ладьей
+							if(x1 == 6 && $('#0_5').attr('figure') == undefined && destEmpty && castlings[3]){
+								if(CheckSecureOnMove(4,0,5,0,'black', true) && CheckSecureOnMove(4,0,6,0,'black', true) && (!CheckCheck('black'))){
+									return true;
+								}
+							}
+						}
+					}
+					return false;
+				}
+				if(white){
+					if(!destEmpty && destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && !destWhite)) && (Math.abs(dx) <= 1) && (Math.abs(dy) <= 1))
+						return true;
+				}
+				else if(!white){
+					if(!destEmpty && !destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && destWhite)) && (Math.abs(dx) <= 1) && (Math.abs(dy) <= 1))
+						return true;
+				}
+				break;
+			case 'queen':
+				if(white){
+					if(!destEmpty && destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && !destWhite))){
+						if(Math.abs(dx) != Math.abs(dy)){
+							if((dx != 0) && (dy != 0)){
+								return false;
+							}
+						}
+						if(dx == 0){
+							if(dy> 0){
+								for(var i = y0+1; i<y1;i++){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = y0-1; i>y1;i--){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(dy == 0){
+							if(dx> 0){
+								for(var i = x0+1; i<x1;i++){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = x0-1; i>x1;i--){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(Math.abs(dx) == Math.abs(dy)){
+							if(dx > 0 && dy > 0){
+								for(var i=x0+1, j=y0+1;i<x1,j<y1;i++,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx > 0 && dy < 0){
+								for(var i=x0+1, j=y0-1;i<x1,j>y1;i++,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx < 0 && dy > 0){
+								for(var i=x0-1, j=y0+1;i>x1,j<y1;i--,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i=x0-1, j=y0-1;i>x1,j>y1;i--,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				else if(!white){
+					if(!destEmpty && !destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && destWhite))){
+						//&& (Math.abs(dx) < 1) && (Math.abs(dy)))
+						//	return true;
+						if(Math.abs(dx) != Math.abs(dy)){
+							if((dx != 0) && (dy != 0)){
+								return false;
+							}
+						}
+						if(dx == 0){
+							if(dy> 0){
+								for(var i = y0+1; i<y1;i++){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = y0-1; i>y1;i--){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(dy == 0){
+							if(dx> 0){
+								for(var i = x0+1; i<x1;i++){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = x0-1; i>x1;i--){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(Math.abs(dx) == Math.abs(dy)){
+							if(dx > 0 && dy > 0){
+								for(var i=x0+1, j=y0+1;i<x1,j<y1;i++,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx > 0 && dy < 0){
+								for(var i=x0+1, j=y0-1;i<x1,j>y1;i++,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx < 0 && dy > 0){
+								for(var i=x0-1, j=y0+1;i>x1,j<y1;i--,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i=x0-1, j=y0-1;i>x1,j>y1;i--,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										////if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				break;
+			case 'bishop':
+				if(white){
+					if(!destEmpty && destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && !destWhite))){
+						//&& (Math.abs(dx) < 1) && (Math.abs(dy)))
+						//	return true;
+						if(Math.abs(dx) != Math.abs(dy)){
+							return false;
+						}
+
+						if(Math.abs(dx) == Math.abs(dy)){
+							if(dx > 0 && dy > 0){
+								for(var i=x0+1, j=y0+1;i<x1,j<y1;i++,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx > 0 && dy < 0){
+								for(var i=x0+1, j=y0-1;i<x1,j>y1;i++,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx < 0 && dy > 0){
+								for(var i=x0-1, j=y0+1;i>x1,j<y1;i--,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i=x0-1, j=y0-1;i>x1,j>y1;i--,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				else if(!white){
+					if(!destEmpty && !destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && destWhite))){
+						//&& (Math.abs(dx) < 1) && (Math.abs(dy)))
+						//	return true;
+						if(Math.abs(dx) != Math.abs(dy)){
+							return false;
+						}
+						if(Math.abs(dx) == Math.abs(dy)){
+							if(dx > 0 && dy > 0){
+								for(var i=x0+1, j=y0+1;i<x1,j<y1;i++,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx > 0 && dy < 0){
+								for(var i=x0+1, j=y0-1;i<x1,j>y1;i++,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else if(dx < 0 && dy > 0){
+								for(var i=x0-1, j=y0+1;i>x1,j<y1;i--,j++){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i=x0-1, j=y0-1;i>x1,j>y1;i--,j--){
+									var atr = $('#'+j+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				break;
+			case 'knight':
+				var possible_moves  =
+					[[-1, -2], [-2, -1], [-2,  1], [ 1, -2],
+					 [-1,  2], [ 2, -1], [ 1,  2], [ 2,  1]];
+				for(var i = 0;i<8;i++){
+					if(dx == possible_moves[i][0] && dy == possible_moves[i][1] && (destEmpty || (!destEmpty && (destWhite != white))))
+						return true;
+				}
+				return false;
+				break;
+			case 'rook':
+				if(white){
+					if(!destEmpty && destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && !destWhite))){
+						//&& (Math.abs(dx) < 1) && (Math.abs(dy)))
+						//	return true;
+						if((dx != 0) && (dy != 0)){
+							return false;
+						}
+						if(dx == 0){
+							if(dy> 0){
+								for(var i = y0+1; i<y1;i++){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = y0-1; i>y1;i--){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(dy == 0){
+							if(dx> 0){
+								for(var i = x0+1; i<x1;i++){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = x0-1; i>x1;i--){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('white') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				else if(!white){
+					if(!destEmpty && !destWhite)
+						return false;
+					if((destEmpty || (!destEmpty && destWhite))){
+						if((dx != 0) && (dy != 0)){
+							return false;
+						}
+						if(dx == 0){
+							if(dy> 0){
+								for(var i = y0+1; i<y1;i++){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = y0-1; i>y1;i--){
+									var atr = $('#'+i+'_'+x0).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+						else if(dy == 0){
+							if(dx> 0){
+								for(var i = x0+1; i<x1;i++){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+							else{
+								for(var i = x0-1; i>x1;i--){
+									var atr = $('#'+y0+'_'+i).attr('figure');
+									if(atr != undefined){
+										//if(atr.indexOf('black') > -1)
+											return false;
+									}
+								}
+							}
+						}
+					}
+					return true;
+				}
+				break;
+			case 'pawn':
+				if(white){
+					if(dx==0){
+						if(dy==-1 && destEmpty){
+							return true;
+						}
+						else if (dy == -2 && y0==6 && destEmpty && ($('#5_'+x0).attr('figure') == undefined)){
+							return true;
+						}
+						else
+							return false;
+					}
+					// проверка для взятия на проходе
+					// если цель пуста, предыдущей ходила пешка противника, она ходила на 2 клетки, мы ходим вбок и вперед на 2 клетки, ходим на нужный столбец,
+					// координаты вражеской пешки корректны и она сдвинулась на 2 клетки с начальной позиции
+					else if(destEmpty && (lastTurn['figure'] == 'pawn_black') && (Math.abs(lastTurn['fromY'] - lastTurn['toY'])==2)
+							&& (Math.abs(dx) == 1) && (dy == -1) && (x1 == lastTurn['toX']) && (y1+1==lastTurn['toY']) && (lastTurn['toY']==3)){
+							eatPawn['eat'] = true;
+							eatPawn['x'] = lastTurn['toX'];
+							eatPawn['y'] = lastTurn['toY'];
+							return true;
+					}
+					else if ((Math.abs(dx) == 1) && (dy == -1) && !destEmpty && !destWhite ){
+						return true;
+					}
+
+					else
+						return false;
+				}
+				else if(!white){
+					if(dx==0){
+						if(dy==1 && destEmpty){
+							return true;
+						}
+						else if (dy == 2 && y0==1 && destEmpty && ($('#2_'+x0).attr('figure') == undefined)){
+							return true;
+						}
+						else
+							return false;
+					}
+					else if(destEmpty && (lastTurn['figure'] == 'pawn_white') && (Math.abs(lastTurn['fromY'] - lastTurn['toY'])==2)
+							&& (Math.abs(dx) == 1) && (dy == 1) && (x1 == lastTurn['toX']) && (y1-1==lastTurn['toY']) && (lastTurn['toY']==4)){
+							eatPawn['eat'] = true;
+							eatPawn['x'] = lastTurn['toX'];
+							eatPawn['y'] = lastTurn['toY'];
+							return true;
+					}
+					else if ((Math.abs(dx) == 1) && (dy == 1) && !destEmpty && destWhite ){
+						return true;
+					}
+					else
+						return false;
+				}
+				break;
+		}
+		return false;
+	};
+
+	function saveLastMove(x0,y0,x1,y1, figure){
+		lastTurn['fromX'] = Number(x0);
+		lastTurn['fromY'] = Number(y0);
+		lastTurn['toX'] = Number(x1);
+		lastTurn['toY'] = Number(y1);
+		lastTurn['figure'] = figure;
+		$('#choose_menu').css('display','none');
+
+		// так как эта функция вызывается на каждом ходе, тут проверяем, дошла ли пешка до конца поля
+		if(figure.indexOf('pawn') > -1){	// если это пешка
+			var white = figure.indexOf('white') > -1;
+			if(white){
+				if(y0 == 1 && y1 == 0){
+					// пешка белых дошла до конца поля
+					$('#choose_menu').css('display','block');
+				}
+			}
+			else if(!white){
+				if(y0 = 6 && y1 == 7){
+					// пешка черных дошла до конца поля
+					$('#choose_menu').css('display','block');
+				}
+			}
+		}
+	}
+
+	function figureClick(){
+		$('#infobar').html('');
+		if(selected['white'] == undefined && $(this).attr('figure') == undefined)
+		{
+			// нету выделенной и нажали на пустую
+			return;
+		}
+		else if(whiteTurn && (selected['white'] == true) && ($(this).attr('figure') == undefined)){
+			// белые делают ход
+			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'white')){
+				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+
+				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
+				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
+				$('#'+selected['y']+'_'+selected['x']).attr('figure', null); // null в значении атрибута => удаление атрибута
+				$('#'+selected['y']+'_'+selected['x']).html('');
+
+				if(eatPawn['eat'] == true){
+					// если пешка сделала взятие на проходе
+					$('#'+eatPawn['y']+'_'+eatPawn['x']).attr('figure', null);
+					$('#'+eatPawn['y']+'_'+eatPawn['x']).html('');
+					eatPawn = {};
+				}
+
+				// если текущих ход делает ладья (башня), то рокировка с ней более не возможна.
+				// отмечаем, что возможности сделать рокировку с соответствующей ладьей более нету
+				if(selected['x']==0 && selected['y']==7){
+					castlings[0] = false;
+				}
+				else if(selected['x']==7 && selected['y']==7){
+					castlings[1] = false;
+				}
+
+				// если король сдвигается, то рокировки более для него невозможны
+				if(selected['figure'] == 'king_white'){
+					// такой ход будет допустим только при выполнении рокировки
+					if(selected['x']==4 && ($(this).attr('x') == 6 || $(this).attr('x') == 2)){
+						if($(this).attr('x') == 6){
+							// переносим ладью
+							$('#7_5').html($('#7_7').html());
+							$('#7_5').attr('figure', $('#7_7').attr('figure'));
+							$('#7_7').html('');
+							$('#7_7').attr('figure', null);
+						}
+						else if($(this).attr('x') == 2){
+							// переносим ладью
+							$('#7_3').html($('#7_0').html());
+							$('#7_3').attr('figure', $('#7_0').attr('figure'));
+							$('#7_0').html('');
+							$('#7_0').attr('figure', null);
+						}
+					}
+					castlings[0] = false;
+					castlings[1] = false;
+				}
+
+				if(selected['figure'].indexOf('pawn') == -1){
+					turnsCount ++;
+					if(turnsCount >= 50){
+						// произведено 50 ходов без взятий и движений пешками
+						$('#curGameState2').html('50 turns rule activated!');
+					}
+				}
+				else {
+					// сходили пешкой, сбрасываем счетчик
+					turnsCount = 1;
+				}
+
+				selected = {};
+				whiteTurn = !whiteTurn;
+				if (SaveStateAndCheck()) {
+					// если обнаружили трижды повторяющуюся позицию
+					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
+					$('#curGameState').html('Found three-times repeated position!');
+				}
+			}
+		}
+		else if(!whiteTurn && (selected['white'] == false) && ($(this).attr('figure') == undefined)){
+			// черные делают ход
+			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'black')){
+				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+
+				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
+				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
+				$('#'+selected['y']+'_'+selected['x']).attr('figure', null);
+				$('#'+selected['y']+'_'+selected['x']).html('');
+
+				if(eatPawn['eat'] == true){
+					// если пешка сделала взятие на проходе
+					$('#'+eatPawn['y']+'_'+eatPawn['x']).attr('figure', null);
+					$('#'+eatPawn['y']+'_'+eatPawn['x']).html('');
+					eatPawn = {};
+				}
+
+				// если текущих ход делает ладья (башня), то рокировка с ней более не возможна.
+				// отмечаем, что возможности сделать рокировку с соответствующей ладьей более нету
+				if(selected['x']==0 && selected['y']==0){
+					castlings[2] = false;
+				}
+				else if(selected['x']==7 && selected['y']==0){
+					castlings[3] = false;
+				}
+
+				// если король сдвигается, то рокировки более для него невозможны
+				if(selected['figure'] == 'king_black'){
+					// такой ход будет допустим только при выполнении рокировки
+					if(selected['x']==4 && ($(this).attr('x') == 6 || $(this).attr('x') == 2)){
+						if($(this).attr('x') == 6){
+							// переносим ладью
+							$('#0_5').html($('#0_7').html());
+							$('#0_5').attr('figure', $('#0_7').attr('figure'));
+							$('#0_7').html('');
+							$('#0_7').attr('figure', null);
+						}
+						else if($(this).attr('x') == 2){
+							// переносим ладью
+							$('#0_3').html($('#0_0').html());
+							$('#0_3').attr('figure', $('#0_0').attr('figure'));
+							$('#0_0').html('');
+							$('#0_0').attr('figure', null);
+						}
+					}
+					castlings[2] = false;
+					castlings[3] = false;
+				}
+
+				if(selected['figure'].indexOf('pawn') == -1){
+					turnsCount ++;
+					if(turnsCount >= 50){
+						// произведено 50 ходов без взятий и движений пешками
+						$('#curGameState2').html('50 turns rule activated!');
+					}
+				}
+				else {
+					// сходили пешкой, сбрасываем счетчик
+					turnsCount = 1;
+				}
+
+				selected = {};
+				whiteTurn = !whiteTurn;
+				if (SaveStateAndCheck()) {
+					// если обнаружили трижды повторяющуюся позицию
+					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
+					$('#curGameState').html('Found three-times repeated position!');
+				}
+			}
+		}	// indexOf - поиск подстроки. Нашел > -1
+		else if(whiteTurn && ($(this).attr('figure').indexOf('white')>-1)){
+			// белые выделяют свою фигуру
+			$('#infobar').append('<div>Coordinates are: {X=' + $(this).attr('x')+'; Y='+$(this).attr('y') + '}</div>');
+			$('#infobar').append('<div>User clicked: ' + $(this).attr('figure')+'</div>');
+
+			selected['figure'] = $(this).attr('figure');
+			selected['x'] = $(this).attr('x');
+			selected['y'] = $(this).attr('y');
+			selected['white'] = true;
+		}
+		else if (whiteTurn && ($(this).attr('figure').indexOf('black')>-1) && (selected['white'] == true)){
+			// белые едят черных в случае возможности хода
+			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'white')){
+				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+
+				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
+				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
+				$('#'+selected['y']+'_'+selected['x']).attr('figure', null);
+				$('#'+selected['y']+'_'+selected['x']).html('');
+
+				// если текущих ход делает ладья (башня), то рокировка с ней более не возможна.
+				// отмечаем, что возможности сделать рокировку с соответствующей ладьей более нету
+				if(selected['x']==0 && selected['y']==7){
+					castlings[0] = false;
+				}
+				else if(selected['x']==7 && selected['y']==7){
+					castlings[1] = false;
+				}
+
+				// если король сдвигается, то рокировки более для него невозможны
+				if(selected['figure'] == 'king_white'){
+					castlings[0] = false;
+					castlings[1] = false;
+				}
+
+				// произведено взятие, сбрасываем счетчик
+				turnsCount = 1;
+
+				selected = {};
+				whiteTurn = !whiteTurn;
+				if (SaveStateAndCheck()) {
+					// если обнаружили трижды повторяющуюся позицию
+					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
+					$('#curGameState').html('Found three-times repeated position!');
+				}
+			}
+		}
+		else if(!whiteTurn && ($(this).attr('figure').indexOf('black')>-1)){
+			// черные выделяют свою фигуру
+			$('#infobar').append('<div>Coordinates are: {X=' + $(this).attr('x')+'; Y='+$(this).attr('y') + '}</div>');
+			$('#infobar').append('<div>User clicked: ' + $(this).attr('figure')+'</div>');
+
+			selected['figure'] = $(this).attr('figure');
+			selected['x'] = $(this).attr('x');
+			selected['y'] = $(this).attr('y');
+			selected['white'] = false;
+		}
+		else if(!whiteTurn && ($(this).attr('figure').indexOf('white')>-1) && (selected['white'] == false)){
+			// очень голодные черные
+			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'black')){
+				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+
+				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
+				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
+				$('#'+selected['y']+'_'+selected['x']).attr('figure', null);
+				$('#'+selected['y']+'_'+selected['x']).html('');
+
+				// если текущих ход делает ладья (башня), то рокировка с ней более не возможна.
+				// отмечаем, что возможности сделать рокировку с соответствующей ладьей более нету
+				if(selected['x']==0 && selected['y']==0){
+					castlings[2] = false;
+				}
+				else if(selected['x']==7 && selected['y']==0){
+					castlings[3] = false;
+				}
+
+				// если король сдвигается, то рокировки более для него невозможны
+				if(selected['figure'] == 'king_black'){
+					castlings[2] = false;
+					castlings[3] = false;
+				}
+
+				// произведено взятие, сбрасываем счетчик
+				turnsCount = 1;
+
+				selected = {};
+				whiteTurn = !whiteTurn;
+				if (SaveStateAndCheck()) {
+					// если обнаружили трижды повторяющуюся позицию
+					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
+					$('#curGameState').html('Found three-times repeated position!');
+				}
+			}
+		}
+		else{
+			selected = {};
+		}
+
+		highLightBoard();
+		if(CheckCheckmate('white')){
+			$('#curMoveColor').append('Checkmate to white!');
+		}
+		else if(CheckCheckmate('black')) {
+			$('#curMoveColor').append('Checkmate to black!');
+		}
+		else if(CheckCheck('white')){
+			$('#curMoveColor').append('Check to white!');
+		}
+		else if (CheckCheck('black')) {
+			$('#curMoveColor').append('Check to black!');
+		}
+		else if (CheckStalemate('white')) {
+			$('#curMoveColor').append('Stalemate to white!');
+		}
+		else if (CheckStalemate('black')) {
+			$('#curMoveColor').append('Stalemate to black!');
+		}
+	};
+
+	function highLightBoard(){
+		// убираем выделение со всех ячеек
+		// removeClass - Удаляет все или указанный(е) класс(ы) из набора совпавших элементов.
+		$('.square').removeClass('square_highlighted');
+		$('.square').removeClass('figure_highlighted');
+
+		if(selected['figure'] != undefined){
+			var x0 = Number(selected['x']);
+			var y0 = Number(selected['y']);
+
+			$('#'+y0+'_'+x0).addClass('figure_highlighted');
+
+			for(var x=0; x<8; x++){
+				for(var y=0; y<8; y++){
+					if(CheckSecureOnMove(x0,y0,x,y, selected['figure'].split('_')[1])){
+						$('#'+y+'_'+x).addClass('square_highlighted');
+					}
+				}
+			}
+		}
+		if(whiteTurn)
+			$('#curMoveColor').html('White turn! ');
+		else {
+			$('#curMoveColor').html('Black turn! ');
+		}
+	}
+
+	function CheckCheck(color){
+		// проверяем на шах
+		// проходим по всем ячейкам и проверяем, могут ли "сходить" на короля
+		for(var x0=0; x0<8; x0++){
+			for(var y0=0; y0<8; y0++){
+				if($('#'+y0+'_'+x0).attr('figure') != undefined){
+					for(var x=0; x<8; x++){
+						for(var y=0; y<8; y++){
+							if($('#'+y+'_'+x).attr('figure') != undefined){
+								if(isItPossibleMove(x0,y0,x,y) && $('#'+y+'_'+x).attr('figure') == ('king_'+color)){
+									return true;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	function CheckSecureOnMove(x0,y0,x1,y1,color, dontCheckPossibility){
+		// проверяем возможность хода с точки зрения короля
+		// то есть, что при данном ходе мы не подставляем короля под ШАХ
+		// сначала мы сохраняем состояния начальной и целевой клеток
+		// затем "делаем ход", проверяем состояние ШАХа, потом возвращаем состояние доски обратно
+		// при выполнении виртуального хода достаточно только поменять атрибуты клеток без замены картинок, так как только атрибуты имеют значение
+		var srcAttr = $('#'+y0+'_'+x0).attr('figure');	// состояние начальной клетки
+		var destAttr = $('#'+y1+'_'+x1).attr('figure');	// состояние целевой клетки
+		var secure = true;		// флаг - ход безопасен
+
+		// такой случай происходит когда нам не нужно проверять "корректность" хода повторно, например при вызове этого метода из isItPossibleMove, для избежания рекурсии
+		if(dontCheckPossibility != undefined){
+			$('#'+y1+'_'+x1).attr('figure', $('#'+y0+'_'+x0).attr('figure'));
+			$('#'+y0+'_'+x0).attr('figure', null); // null в значении атрибута => удаление атрибута
+			secure = !CheckCheck(color);
+		}
+		else if(isItPossibleMove(x0,y0,x1,y1)){
+			$('#'+y1+'_'+x1).attr('figure', $('#'+y0+'_'+x0).attr('figure'));
+			$('#'+y0+'_'+x0).attr('figure', null); // null в значении атрибута => удаление атрибута
+			secure = !CheckCheck(color);
+		}
+		else{
+			secure = false;
+		}
+		// возвращаем состояния клеткам доски
+		$('#'+y1+'_'+x1).attr('figure', destAttr == undefined ? null : destAttr);
+		$('#'+y0+'_'+x0).attr('figure', srcAttr == undefined ? null : srcAttr); // null в значении атрибута => удаление атрибута
+		return secure;
+	}
+
+	function CheckCheckmate(color){
+		// проверяем на ШАХ И МАТ
+		var checkmate = true;	// флаг - шах и мат
+
+		for(var x0=0; x0<8; x0++){
+			for(var y0=0; y0<8; y0++){
+				if(($('#'+y0+'_'+x0).attr('figure') != undefined) && ($('#'+y0+'_'+x0).attr('figure').indexOf(color) > -1)){
+					for(var x=0; x<8; x++){
+						for(var y=0; y<8; y++){
+							// проверяем для каждой фигуры атакованного игрока возможность сделать безопасный для короля ход
+							// то есть такой, в результате которого он не будет под ШАХОМ
+							if(CheckSecureOnMove(x0,y0,x,y,color)){
+								// если такой ход найден, то МАТ не поставлен
+								checkmate = false;
+							}
+						}
+					}
+				}
+			}
+		}
+		// ШАХ И МАТ, если игрок не может выйти из под ШАХА
+		return checkmate && CheckCheck(color);
+	}
+
+	function CheckStalemate(color){
+		// проверяем на ПАТ
+		var stalemate = true;
+
+
+		for(var x0=0; x0<8; x0++){
+			for(var y0=0; y0<8; y0++){
+				if(($('#'+y0+'_'+x0).attr('figure') != undefined) && ($('#'+y0+'_'+x0).attr('figure').indexOf(color) > -1)){
+					for(var x=0; x<8; x++){
+						for(var y=0; y<8; y++){
+							// проверяем для каждой фигуры атакованного игрока возможность сделать безопасный для короля ход
+							// то есть такой, в результате которого он не будет под ШАХОМ
+							if(CheckSecureOnMove(x0,y0,x,y,color)){
+								// если такой ход найден, то ПАТА нету
+								stalemate = false;
+							}
+						}
+					}
+				}
+
+			}
+		}
+		// ПАТ аналогичен МАТУ, но при этом игрок не находится под ШАХОМ
+		return stalemate;
+	}
+
+	function SaveStateAndCheck(){
+		// сохраняем состояние доски и заодно проверяем, не повторялась ли ситуация 3 и более раз
+
+		// состояние доски храним в словаре
+		// ключ (само состояние) составляется как сумма информации о:
+		// состоянии ячеек, текущем игроке, возможных ходах (включая рокировки и взятия на проходе)
+		var currentState = $('#board');	// добавляем к ключу текущее состояние ячеек доски
+		currentState += castlings; 	// добавляем к ключу возможности рокировок
+		currentState += whiteTurn;	// добавляем к ключу текущего игрока
+
+		for(var x0=0; x0<8; x0++){
+			for(var y0=0; y0<8; y0++){
+				if($('#'+y0+'_'+x0).attr('figure') != undefined){
+					var color = $('#'+y0+'_'+x0).attr('figure').indexOf('white') > -1 ? 'white' : 'black';
+					for(var x=0; x<8; x++){
+						for(var y=0; y<8; y++){
+							// ищем для каждой фигуры на доске возможные ходы и добавляем их к ключу
+							if(CheckSecureOnMove(x0,y0,x,y,color)){
+								currentState += x0+y0+x+y;
+							}
+						}
+					}
+				}
+
+			}
+		}
+
+		if(stateHistory[currentState] == undefined){
+			// если такого состояния еще не было, то добавляем его с числом повторений = 1
+			stateHistory[currentState] = 1;
+		}
+		else {
+			// если такое состояние уже было, то увеличиваем счетчик
+			stateHistory[currentState] += 1;
+		}
+
+		if(stateHistory[currentState] >= 3){
+			// если таких состояний было не менее трех
+			return true;
+		}
+		return false;
+	}
+
+
+	/*
+	Базовые селекторы jQuery
+
+	"*" - все элементы
+	".className" - элементы с классом className
+	"#idName" - элемент (один!) с идентификатором idName
+	"tagName" - элементы с заданным именем тега
+	*/
+
+    function build(){
+        var white = true;
+        for(var i = 0;i<8;i++){
+            for(var j = 0;j<8;j++){
+				// append добавляет разметку внутрь выбранного объекта
+                $('#board').append('<div x="'+j+'" y="' + i+'" id="'+ i+'_'+j +'"class="square '+ (white ? 'square_white' : 'square_black') + '"></div>');
+				// вешаем обработчик на клик по добавленному div'у (в параметре имя функции)
+				$('#'+i+'_'+j).click(figureClick);
+                white = !white;
+
+
+            }
+            white = !white;
+        }
+    }
+    function fill(){
+		// html() - вернет внутреннюю разметку
+		// html('smth') - перезапишет внутреннюю разметку на smth
+        $('#0_0').html('<img src="images/rook_black.png" class="figure" />')
+        $('#0_7').html('<img src="images/rook_black.png" class="figure" />')
+        //$('#0_1').html('<img src="images/knight_black.png" class="figure" />')
+        //$('#0_6').html('<img src="images/knight_black.png" class="figure" />')
+        //$('#0_2').html('<img src="images/bishop_black.png" class="figure" />')
+        //$('#0_5').html('<img src="images/bishop_black.png" class="figure" />')
+        //$('#0_3').html('<img src="images/queen_black.png" class="figure" />')
+		$('#0_4').html('<img src="images/king_black.png" class="figure" />')
+
+
+        $('#7_0').html('<img src="images/rook_white.png" class="figure" />')
+        $('#7_7').html('<img src="images/rook_white.png" class="figure" />')
+        //$('#7_1').html('<img src="images/knight_white.png" class="figure" />')
+        //$('#7_6').html('<img src="images/knight_white.png" class="figure" />')
+        //$('#7_2').html('<img src="images/bishop_white.png" class="figure" />')
+        //$('#7_5').html('<img src="images/bishop_white.png" class="figure" />')
+        //$('#7_3').html('<img src="images/queen_white.png" class="figure" />')
+        $('#7_4').html('<img src="images/king_white.png" class="figure" />')
+
+		// attr(name, value)
+        $('#0_0').attr('figure', 'rook_black')
+        $('#0_7').attr('figure', 'rook_black')
+        //$('#0_1').attr('figure', 'knight_black')
+        //$('#0_6').attr('figure', 'knight_black')
+        //$('#0_2').attr('figure', 'bishop_black')
+        //$('#0_5').attr('figure', 'bishop_black')
+        //$('#0_3').attr('figure', 'queen_black')
+		$('#0_4').attr('figure', 'king_black')
+
+
+        $('#7_0').attr('figure', 'rook_white')
+        $('#7_7').attr('figure', 'rook_white')
+        //$('#7_1').attr('figure', 'knight_white')
+        //$('#7_6').attr('figure', 'knight_white')
+        //$('#7_2').attr('figure', 'bishop_white')
+        //$('#7_5').attr('figure', 'bishop_white')
+        //$('#7_3').attr('figure', 'queen_white')
+        $('#7_4').attr('figure', 'king_white')
+
+        for(var i = 0;i<8;i++){
+            $('#1_'+i).html('<img src="images/pawn_black.png" class="figure" />');
+            $('#6_'+i).html('<img src="images/pawn_white.png" class="figure" />');
+
+            $('#1_'+i).attr('figure', 'pawn_black');
+            $('#6_'+i).attr('figure', 'pawn_white');
+        }
+
+
+		$('#1_5').html('<img src="images/pawn_white.png" class="figure" />')
+		$('#1_5').attr('figure', 'pawn_white')
+
+    }
+	</script>
+</head>
+<body>
+	<div id="choose_menu" style="display:none">
+		<input type="radio" name="fig" value="king"> King </input>
+		<input type="radio" name="fig" value="queen"> Queen </input>
+	   	<input type="radio" name="fig" value="knight"> Knight </input>
+		<input type="radio" name="fig" value="bishop"> Bishop </input>
+		<input type="radio" name="fig" value="rook"> Rook </input>
+		<input type="submit" value="OK" id="ok_btn"/>
+	</div>
+	<div><h2 id="curMoveColor" ></h2><h2 id="curGameState" ></h2><h2 id="curGameState2" ></h2></div>
+	<div id="board" class="board"></div>
+	<div id="infobar"></div>
+</body>
+
+</html>
