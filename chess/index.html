@@ -53,9 +53,12 @@
 	<script type="text/javascript" src="jquery.min.js"></script>
 	<script type="text/javascript" src="jquery-ui.min.js"></script>
 	<link href="jquery-ui.min.css" rel="stylesheet" />
-
+	<script type="text/javascript" src="socket.io.js"></script>
 	<script type="text/javascript">
 	var whiteTurn = true;
+	var playerWhite = true;
+	var extr = false;		// флаг, указывающий, что ход сделан извне (другим игроком)
+	var dontHighlight = false;		// флаг, указывающий на то, что не нужно подсвечивать доску при клике на ячейки доски (при выполнении "хода" противника)
 	var lastTurn = {};
 	var eatPawn = {};  // вспомогательная переменная, хранящая информвцию о съеденной на проходе пешке
     var selected = {}; // словарь
@@ -63,6 +66,141 @@
 	var turnsCount = 0;		// количество ходов, при которых не было совершено ни одно взятие и не ходила ни одна пешка
 	// допустимость рокировок. [белая левая ладья/белая правая ладья/черная левая ладья/черная правая ладья]
 	var castlings = [true,true,true,true];
+
+	var gameBlocked = true;		// глобальный флаг, указывающий на состояние игры (началась//не началась или уже закончилась)
+	// когда он установлен, нажатия на поле игнорируются
+
+
+	var socket = io.connect('http://localhost:9898');
+	socket.on('message', function(msg) {
+	  console.log(msg);
+	});
+
+	// обработчик сообщения о нахождении и старте игры. до старта игры пользователь не может двигать фигуры на доске
+	socket.on('game_found', function(msg) {
+		console.log(msg);
+		// скрываем кнопку поиска игры
+		$('#game_find_menu').hide();
+		// снимаем блокировку с игры
+		gameBlocked = false;
+		alert('Game started! You are: '+msg.color);
+		// сохраняем цвет, которым будет играть текущий игрок
+		playerWhite = msg.color == 'white';
+	});
+
+	// обработчик сообщения о передвижении соперника
+	socket.on('player_move', function(msg) {
+		console.log(msg);
+		// переводим координаты из общего формата в свой
+		var fr = DecodeCoordinates(msg.from.x, msg.from.y);
+		var to = DecodeCoordinates(msg.to.x, msg.to.y);
+
+		// проверяем возможность такого хода и эмулируем нажатия на соответствующие фигуры
+		if(CheckSecureOnMove(fr.x, fr.y, to.x, to.y, playerWhite? 'black':'white')){
+			dontHighlight = true;	// отключаем подсветку на данном ходе
+			extr = true;
+			$('#'+fr.y+'_'+fr.x).click();		// вызываем событие клика у ячейки, как будто туда нажали мышкой
+			extr = true;
+			$('#'+to.y+'_'+to.x).click();
+			dontHighlight = false;	// возвращаем подсветку
+		}
+		else{
+			// если такой ход сделать нельзя, то ругаемся
+			socket.emit('turnValidation_invalid');
+		}
+	});
+
+	// обработчик сообщения о проведении рокировки
+	socket.on('player_castling', function(msg) {
+		console.log(msg);
+		// переводим координаты из общего формата в свой
+		var fr = DecodeCoordinates(msg.from.x, msg.from.y);
+		var x = 4;
+		var y = fr.y;		// y - не меняется на этом ходе
+
+		var toX = fr.x == 0 ? 2 : 6;	// выясняем координаты, куда передвигается король
+
+		// проверяем возможность такого хода и эмулируем нажатия на соответствующие фигуры
+		if(CheckSecureOnMove(x, y, toX, y, playerWhite? 'black':'white')){
+			dontHighlight = true;
+			extr = true;
+			$('#'+y+'_'+x).click();		// вызываем событие клика у ячеек доски
+			extr = true;
+			$('#'+y+'_'+toX).click();
+			dontHighlight = false;
+		}
+		else{
+			// если такой ход сделать нельзя, то ругаемся
+			socket.emit('turnValidation_invalid');
+		}
+	});
+
+	// обработчик сообщения о проводе пешки и замене её на другую фигуру
+	socket.on('player_promotion', function(msg) {
+		console.log(msg);
+		// переводим координаты из общего формата в свой
+		var fr = DecodeCoordinates(msg.from.x, msg.from.y);
+		var to = DecodeCoordinates(msg.to.x, msg.to.y);
+
+		// проверяем возможность такого хода и самостоятельно проводим необходимые действия с фигурами (нельзя отдавать основной логике из-за необходимости выбрать фигуру, на которую будет заменена пешка)
+		if(CheckSecureOnMove(fr.x, fr.y, to.x, to.y, playerWhite? 'black':'white')){
+
+			//$('#'+to.y+'_'+to.x).html($('#'+fr.y+'_'+fr.x).html());
+			//$('#'+to.y+'_'+to.x).attr('figure', $('#'+fr.y+'_'+fr.x).attr('figure'));
+
+			// очищаем исходную ячейку
+			$('#'+fr.y+'_'+fr.x).attr('figure', null); // null в значении атрибута => удаление атрибута
+			$('#'+fr.y+'_'+fr.x).html('');
+
+
+			// в целевую ячейку сразу ставим запрошенную фигуру
+			$('#'+to.y+'_'+to.x).html('<img src="images/' + msg.newPiece + '_'+ (playerWhite ? 'black' : 'white') +'.png" class="figure" />');
+			$('#'+to.y+'_'+to.x).attr('figure', msg.newPiece + '_' + (playerWhite ? 'black' : 'white'));
+			whiteTurn = !whiteTurn;		// необходим ручной переход хода
+		}
+		else{
+			// если такой ход сделать нельзя, то ругаемся
+			socket.emit('turnValidation_invalid');
+		}
+		SetGameStateInfoText();
+	});
+
+	// обработчик сообщения о том, что игроку поставлен МАТ
+	socket.on('player_mate', function(msg) {
+		console.log(msg);
+		// проверяем на МАТ
+		if(CheckCheckmate(playerWhite ? 'black' : 'white')){
+			socket.emit('turnValidation_mate');
+		}
+		else{
+			// если данные некорректны, то ругаемся
+			socket.emit('turnValidation_invalid');
+		}
+	});
+
+	// обработчик сообшения о том, что произошла ничья (в рамках данного протокола - ПАТ)
+	socket.on('player_draw', function(msg) {
+		console.log(msg);
+		// проверяем на ПАТ
+		if(CheckStalemate(playerWhite ? 'black' : 'white')){
+			socket.emit('turnValidation_draw');
+		}
+		else{
+			// если данные некорректны, то ругаемся
+			socket.emit('turnValidation_invalid');
+		}
+		SetGameStateInfoText();
+	});
+
+	// обработчик сообщения об окончании игры
+	socket.on('game_end', function(msg) {
+		console.log(msg);
+		gameBlocked = true;		// блокируем любые действия с доской (а вдруг захочется оценить расстановку фигур в конце игры?)
+		alert('Game ended. Winner:' + msg.winnerColor);
+		SetGameStateInfoText();
+	});
+
+
 
     $().ready(function(){
         build();
@@ -76,8 +214,28 @@
 			var white = lastTurn['figure'].indexOf('white') > -1;
 			$('#'+lastTurn['toY']+'_'+lastTurn['toX']).html('<img src="images/' + choose + '_'+ (white ? 'white' : 'black') +'.png" class="figure" />');
 			$('#'+lastTurn['toY']+'_'+lastTurn['toX']).attr('figure', choose + '_' + (white ? 'white' : 'black'));
+			var fr = EncodeCoordinates(lastTurn['fromX'], lastTurn['fromY']);
+			var to = EncodeCoordinates(lastTurn['toX'], lastTurn['toY']);
+			socket.emit('turn_promotion',{ from:{x:fr.x, y:fr.y}, to:{x:to.x, y:to.y}, newPiece:choose});
 			$('#choose_menu').css('display','none');
-		})
+			whiteTurn = !whiteTurn;
+		});
+
+
+		$('#find_btn').click(function(){
+			// обработчик кнопки поиска игры
+			if($(this).val() == 'Find game'){
+				// заменяем текст на кнопке и отправляем серверу сообщение
+				$(this).val('Stop finding');
+				socket.emit('game_find');
+			}
+			else{
+				// заменяем текст на кнопке и отправляем серверу сообщение
+				$(this).val('Find game');
+				socket.emit('game_stopFinding');
+			}
+		});
+
     });
 	function isItPossibleMove(x0,y0,x1,y1){
 		var x0 = Number(x0);
@@ -646,18 +804,50 @@
 				if(y0 == 1 && y1 == 0){
 					// пешка белых дошла до конца поля
 					$('#choose_menu').css('display','block');
+					return true;
 				}
 			}
 			else if(!white){
 				if(y0 = 6 && y1 == 7){
 					// пешка черных дошла до конца поля
 					$('#choose_menu').css('display','block');
+					return true;
 				}
 			}
 		}
+		return false;
+	}
+
+	// перевод координат из своего формата в общий
+	function EncodeCoordinates(x,y){
+		return {x:x, y:y};
+	}
+
+	// перевод координат из общего формата в свой
+	function DecodeCoordinates(x,y){
+		return {x:x, y:y};
 	}
 
 	function figureClick(){
+		var extern = extr;		// флаг, указывающий, что действие эмулируется и отправлять серверу сообщения не нужно
+		extr = false;
+		if(gameBlocked){
+			// проверяется глобальный флаг, указывающий на то, что игра начата/заблокирована (еще не началась или уже закончилась)
+			return;
+		}
+		if($(this).attr('figure') != undefined){
+			//if($(this).attr('figure').indexOf(playerWhite? 'black' : 'white') > -1){
+			if(!extern && playerWhite != whiteTurn){
+				// нельзя ходить за противника!
+				return;
+			}
+		}
+
+		// флаги, используемые в проверках на необходимость отправки сообщения серверу
+		var draw = false;		// пока не используется
+		var turn = false;	// обычный ход
+		var promotion = false;	// проведение пешки
+		var castling = false;	// рокировка
 		$('#infobar').html('');
 		if(selected['white'] == undefined && $(this).attr('figure') == undefined)
 		{
@@ -667,7 +857,8 @@
 		else if(whiteTurn && (selected['white'] == true) && ($(this).attr('figure') == undefined)){
 			// белые делают ход
 			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'white')){
-				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+				// если saveLastMove вернет true - значит прошло проведение пешки
+				promotion = saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
 
 				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
 				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
@@ -700,6 +891,10 @@
 							$('#7_5').attr('figure', $('#7_7').attr('figure'));
 							$('#7_7').html('');
 							$('#7_7').attr('figure', null);
+							var coords = EncodeCoordinates(7,7);
+							if(!extern)   // проверка, что ход не эмулирован
+								socket.emit('turn_castling', {from:{x:coords.x, y:coords.y}});    // отправляем данные о сделанной рокировке
+							castling = true;    // устанавливаем флаг рокировки, чтобы не отправлялось обычное сообщение о ходе
 						}
 						else if($(this).attr('x') == 2){
 							// переносим ладью
@@ -707,6 +902,10 @@
 							$('#7_3').attr('figure', $('#7_0').attr('figure'));
 							$('#7_0').html('');
 							$('#7_0').attr('figure', null);
+							var coords = EncodeCoordinates(0,7);
+							if(!extern)   // проверка, что ход не эмулирован
+								socket.emit('turn_castling', {from:{x:coords.x, y:coords.y}});    // отправляем данные о сделанной рокировке
+							castling = true;    // устанавливаем флаг рокировки, чтобы не отправлялось обычное сообщение о ходе
 						}
 					}
 					castlings[0] = false;
@@ -718,6 +917,7 @@
 					if(turnsCount >= 50){
 						// произведено 50 ходов без взятий и движений пешками
 						$('#curGameState2').html('50 turns rule activated!');
+						draw = true;
 					}
 				}
 				else {
@@ -725,19 +925,29 @@
 					turnsCount = 1;
 				}
 
-				selected = {};
-				whiteTurn = !whiteTurn;
+
+				if(!promotion) {whiteTurn = !whiteTurn;}    // перевод хода будет выполнен только после выбора фигуры, на которую будет заменена пешка
+
 				if (SaveStateAndCheck()) {
 					// если обнаружили трижды повторяющуюся позицию
 					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
 					$('#curGameState').html('Found three-times repeated position!');
+					draw = true;
 				}
+
+				if(!promotion && !castling && !extern){    // если не проведение пешки, не рокировка, не эмуляцияя хода
+					var fr = EncodeCoordinates(selected['x'], selected['y']);
+					var to = EncodeCoordinates($(this).attr('x'),$(this).attr('y'));
+					socket.emit('turn_move',{ from:{x:fr.x, y:fr.y}, to:{x:to.x, y:to.y}});    // отправляем данные о сделанном ходе
+				}
+				selected = {};
 			}
 		}
 		else if(!whiteTurn && (selected['white'] == false) && ($(this).attr('figure') == undefined)){
 			// черные делают ход
 			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'black')){
-				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+				// если saveLastMove вернет true - значит прошло проведение пешки
+				promotion = saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
 
 				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
 				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
@@ -770,6 +980,10 @@
 							$('#0_5').attr('figure', $('#0_7').attr('figure'));
 							$('#0_7').html('');
 							$('#0_7').attr('figure', null);
+							var coords = EncodeCoordinates(7,0);
+							if(!extern)   // проверка, что ход не эмулирован
+								socket.emit('turn_castling', {from:{x:coords.x, y:coords.y}});    // отправляем данные о сделанной рокировке
+							castling = true;    // устанавливаем флаг рокировки, чтобы не отправлялось обычное сообщение о ходе
 						}
 						else if($(this).attr('x') == 2){
 							// переносим ладью
@@ -777,6 +991,10 @@
 							$('#0_3').attr('figure', $('#0_0').attr('figure'));
 							$('#0_0').html('');
 							$('#0_0').attr('figure', null);
+							var coords = EncodeCoordinates(0,0);
+							if(!extern)   // проверка, что ход не эмулирован
+								socket.emit('turn_castling', {from:{x:coords.x, y:coords.y}});    // отправляем данные о сделанной рокировке
+							castling = true;    // устанавливаем флаг рокировки, чтобы не отправлялось обычное сообщение о ходе
 						}
 					}
 					castlings[2] = false;
@@ -795,8 +1013,13 @@
 					turnsCount = 1;
 				}
 
+				if(!promotion && !castling && !extern){    // если не проведение пешки, не рокировка, не эмуляцияя хода
+					var fr = EncodeCoordinates(selected['x'], selected['y']);
+					var to = EncodeCoordinates($(this).attr('x'),$(this).attr('y'));
+					socket.emit('turn_move',{ from:{x:fr.x, y:fr.y}, to:{x:to.x, y:to.y}});    // отправляем данные о сделанном ходе
+				}
 				selected = {};
-				whiteTurn = !whiteTurn;
+				if(!promotion) {whiteTurn = !whiteTurn;}    // перевод хода будет выполнен только после выбора фигуры, на которую будет заменена пешка
 				if (SaveStateAndCheck()) {
 					// если обнаружили трижды повторяющуюся позицию
 					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
@@ -814,10 +1037,11 @@
 			selected['y'] = $(this).attr('y');
 			selected['white'] = true;
 		}
-		else if (whiteTurn && ($(this).attr('figure').indexOf('black')>-1) && (selected['white'] == true)){
+		else if(whiteTurn && ($(this).attr('figure').indexOf('black')>-1) && (selected['white'] == true)){
 			// белые едят черных в случае возможности хода
 			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'white')){
-				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+				// если saveLastMove вернет true - значит прошло проведение пешки
+				promotion = saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
 
 				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
 				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
@@ -841,9 +1065,13 @@
 
 				// произведено взятие, сбрасываем счетчик
 				turnsCount = 1;
-
+				if(!promotion && !castling && !extern){    // если не проведение пешки, не рокировка, не эмуляцияя хода
+					var fr = EncodeCoordinates(selected['x'], selected['y']);
+					var to = EncodeCoordinates($(this).attr('x'),$(this).attr('y'));
+					socket.emit('turn_move',{ from:{x:fr.x, y:fr.y}, to:{x:to.x, y:to.y}});    // отправляем данные о сделанном ходе
+				}
 				selected = {};
-				whiteTurn = !whiteTurn;
+				if(!promotion) {whiteTurn = !whiteTurn;}    // перевод хода будет выполнен только после выбора фигуры, на которую будет заменена пешка
 				if (SaveStateAndCheck()) {
 					// если обнаружили трижды повторяющуюся позицию
 					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
@@ -864,7 +1092,8 @@
 		else if(!whiteTurn && ($(this).attr('figure').indexOf('white')>-1) && (selected['white'] == false)){
 			// очень голодные черные
 			if(CheckSecureOnMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), 'black')){
-				saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
+				// если saveLastMove вернет true - значит прошло проведение пешки
+				promotion = saveLastMove(selected['x'], selected['y'], $(this).attr('x'), $(this).attr('y'), selected['figure']);
 
 				$(this).html($('#'+selected['y']+'_'+selected['x']).html());
 				$(this).attr('figure', $('#'+selected['y']+'_'+selected['x']).attr('figure'));
@@ -888,9 +1117,13 @@
 
 				// произведено взятие, сбрасываем счетчик
 				turnsCount = 1;
-
+				if(!promotion && !castling && !extern){    // если не проведение пешки, не рокировка, не эмуляцияя хода
+					var fr = EncodeCoordinates(selected['x'], selected['y']);
+					var to = EncodeCoordinates($(this).attr('x'),$(this).attr('y'));
+					socket.emit('turn_move',{ from:{x:fr.x, y:fr.y}, to:{x:to.x, y:to.y}});    // отправляем данные о сделанном ходе
+				}
 				selected = {};
-				whiteTurn = !whiteTurn;
+				if(!promotion) {whiteTurn = !whiteTurn;}    // перевод хода будет выполнен только после выбора фигуры, на которую будет заменена пешка
 				if (SaveStateAndCheck()) {
 					// если обнаружили трижды повторяющуюся позицию
 					// повторение: состояние поля, доступные ходы (включая рокировки, взятия на проходе), текущего ходящего игрока
@@ -902,7 +1135,14 @@
 			selected = {};
 		}
 
+
 		highLightBoard();
+		SetGameStateInfoText();
+		//socket.emit('message', 'message to server');
+	};
+
+	function SetGameStateInfoText(){
+		// устанавливаем текст над игровым полем, который показывает текущее состояние игровой доски
 		if(CheckCheckmate('white')){
 			$('#curMoveColor').append('Checkmate to white!');
 		}
@@ -921,7 +1161,7 @@
 		else if (CheckStalemate('black')) {
 			$('#curMoveColor').append('Stalemate to black!');
 		}
-	};
+	}
 
 	function highLightBoard(){
 		// убираем выделение со всех ячеек
@@ -929,7 +1169,8 @@
 		$('.square').removeClass('square_highlighted');
 		$('.square').removeClass('figure_highlighted');
 
-		if(selected['figure'] != undefined){
+
+		if(selected['figure'] != undefined && !dontHighlight){
 			var x0 = Number(selected['x']);
 			var y0 = Number(selected['y']);
 
@@ -944,9 +1185,9 @@
 			}
 		}
 		if(whiteTurn)
-			$('#curMoveColor').html('White turn! ');
+			$('#curMoveColor').html('White turn! ' + 'You are:' + gameBlocked? '' : (playerWhite? 'white' : 'black'));
 		else {
-			$('#curMoveColor').html('Black turn! ');
+			$('#curMoveColor').html('Black turn! ' + 'You are:' + gameBlocked? '' : (playerWhite? 'white' : 'black'));
 		}
 	}
 
@@ -1177,12 +1418,15 @@
 	</script>
 </head>
 <body>
+	<div id="game_find_menu">
+		<input type="submit" value="Find game" id="find_btn"/>
+	</div>
 	<div id="choose_menu" style="display:none">
-		<input type="radio" name="fig" value="king"> King </input>
 		<input type="radio" name="fig" value="queen"> Queen </input>
 	   	<input type="radio" name="fig" value="knight"> Knight </input>
 		<input type="radio" name="fig" value="bishop"> Bishop </input>
 		<input type="radio" name="fig" value="rook"> Rook </input>
+
 		<input type="submit" value="OK" id="ok_btn"/>
 	</div>
 	<div><h2 id="curMoveColor" ></h2><h2 id="curGameState" ></h2><h2 id="curGameState2" ></h2></div>
