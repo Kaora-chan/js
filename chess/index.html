@@ -2,6 +2,19 @@
 
 <head>
 	<style>
+		.modal{
+		   position: fixed;
+		   top: 0;
+		   left: 0;
+		   background-color: black;
+		   z-index: 99;
+		   opacity: 0.5;
+		   filter: alpha(opacity=80);
+		   -moz-opacity: 0.5;
+		   min-height: 100%;
+		   width: 100%;
+	    }
+
 		div {
 			padding: 0px;
 			margin: 0px;
@@ -58,6 +71,7 @@
 	var whiteTurn = true;
 	var playerWhite = true;
 	var extr = false;		// флаг, указывающий, что ход сделан извне (другим игроком)
+	var spectrator = false;	// флаг, указывающий, что мы только смотрим игру и не можем делать никаких ходов сами
 	var dontHighlight = false;		// флаг, указывающий на то, что не нужно подсвечивать доску при клике на ячейки доски (при выполнении "хода" противника)
 	var lastTurn = {};
 	var eatPawn = {};  // вспомогательная переменная, хранящая информвцию о съеденной на проходе пешке
@@ -71,7 +85,54 @@
 	// когда он установлен, нажатия на поле игнорируются
 
 
+
 	var socket = io.connect('http://localhost:9898');
+
+	// обработчик сообщения от сервера со списком комнат
+	socket.on('roomsList', function(msg) {
+		//alert('!');
+		console.log(msg);
+		// составляем "всплывающее окно"
+		var code = '<div>Choose room for spectrate:</div><br/>';
+		for(var i=0;i<msg.length;i++){
+			// заполняем варианты выбора комнат
+			code+='<input type="radio" name="room" value="'+ msg[i].roomID +'"> Room-'+i+' (people in room:'+msg[i].length+')</input><br/>';
+		}
+		if(msg.length == 0){
+			// если комнат нету
+			code+='<div>No active rooms</div>'
+		}
+		// вставляем кнопки
+		code+='<br/><input type="submit" value="Enter room" id="btn_enter"/><input type="submit" value="Cancel spectrate" id="btn_cancel"/>';
+
+		// вставляем подготовленную разметку в div
+		$('#roomsDiv').html(code);
+
+		// обработчик кнопки "войти"
+		// отписывается от изменений, убирает всплывающее окно и кнопки
+		$('#btn_enter').click(function(){
+			var choose = $( "input:radio:checked" ).val();
+			socket.emit('roomsList_unsubscribe');
+			if(choose != undefined){
+				socket.emit('room_enter', {roomID:choose});
+				$('#spectrate_btn').hide();
+				$('#find_btn').hide();
+				spectrator = true;
+			}
+			$('#roomsDiv').html('');
+			$('#shadow').css('display','none');
+
+		});
+
+		// обработчик кнопки "отмена входа"
+		// отписывается от изменений, убирает всплывающее окно
+		$('#btn_cancel').click(function(){
+			socket.emit('roomsList_unsubscribe');
+			$('#shadow').css('display','none');
+			$('#roomsDiv').html('');
+		});
+	});
+
 	socket.on('message', function(msg) {
 	  console.log(msg);
 	});
@@ -79,8 +140,14 @@
 	// обработчик сообщения о нахождении и старте игры. до старта игры пользователь не может двигать фигуры на доске
 	socket.on('game_found', function(msg) {
 		console.log(msg);
-		// скрываем кнопку поиска игры
+		// скрываем кнопку поиска игры и просмотра комнат
 		$('#game_find_menu').hide();
+		$('#spectrate_btn').hide();
+
+		// если мы только смотрим, то последующая логика не нужна
+		if(spectrator)
+			return;
+
 		// снимаем блокировку с игры
 		gameBlocked = false;
 		alert('Game started! You are: '+msg.color);
@@ -94,6 +161,18 @@
 		// переводим координаты из общего формата в свой
 		var fr = DecodeCoordinates(msg.from.x, msg.from.y);
 		var to = DecodeCoordinates(msg.to.x, msg.to.y);
+
+		// если мы только смотрим, то используем упрощенное воспроизведение ходов
+		if(spectrator){
+			$('#'+to.y+'_'+to.x).html($('#'+fr.y+'_'+fr.x).html());
+			$('#'+to.y+'_'+to.x).attr($('#'+fr.y+'_'+fr.x).attr('figure'));
+
+			// очищаем исходную ячейку
+			$('#'+fr.y+'_'+fr.x).attr('figure', null); // null в значении атрибута => удаление атрибута
+			$('#'+fr.y+'_'+fr.x).html('');
+
+			return;
+		}
 
 		// проверяем возможность такого хода и эмулируем нажатия на соответствующие фигуры
 		if(CheckSecureOnMove(fr.x, fr.y, to.x, to.y, playerWhite? 'black':'white')){
@@ -120,6 +199,32 @@
 
 		var toX = fr.x == 0 ? 2 : 6;	// выясняем координаты, куда передвигается король
 
+		// если мы только смотрим, то используем упрощенное воспроизведение ходов
+		if(spectrator){
+			$('#'+y+'_'+toX).html($('#'+y+'_'+x).html());
+			$('#'+y+'_'+x).attr($('#'+y+'_'+x).attr('figure'));
+
+			// очищаем исходную ячейку где был король
+			$('#'+y+'_'+x).attr('figure', null); // null в значении атрибута => удаление атрибута
+			$('#'+y+'_'+x).html('');
+
+			// проверяем какую ладью надо сдвигать и куда
+			if(toX == 2){
+				$('#'+y+'_3').html($('#'+fr.y+'_'+fr.x).html());
+				$('#'+y+'_3').attr($('#'+fr.y+'_'+fr.x).attr('figure'));
+			}
+			else{
+				$('#'+y+'_5').html($('#'+fr.y+'_'+fr.x).html());
+				$('#'+y+'_5').attr($('#'+fr.y+'_'+fr.x).attr('figure'));
+			}
+
+			// очищаем исходную ячейку с ладьей
+			$('#'+fr.y+'_'+fr.x).attr('figure', null); // null в значении атрибута => удаление атрибута
+			$('#'+fr.y+'_'+fr.x).html('');
+
+			return;
+		}
+
 		// проверяем возможность такого хода и эмулируем нажатия на соответствующие фигуры
 		if(CheckSecureOnMove(x, y, toX, y, playerWhite? 'black':'white')){
 			dontHighlight = true;
@@ -143,8 +248,8 @@
 		var to = DecodeCoordinates(msg.to.x, msg.to.y);
 
 		// проверяем возможность такого хода и самостоятельно проводим необходимые действия с фигурами (нельзя отдавать основной логике из-за необходимости выбрать фигуру, на которую будет заменена пешка)
-		if(CheckSecureOnMove(fr.x, fr.y, to.x, to.y, playerWhite? 'black':'white')){
-
+		// если мы только смотрим, то результат проверки не учитывается
+		if(spectrator || CheckSecureOnMove(fr.x, fr.y, to.x, to.y, playerWhite? 'black':'white')){
 			//$('#'+to.y+'_'+to.x).html($('#'+fr.y+'_'+fr.x).html());
 			//$('#'+to.y+'_'+to.x).attr('figure', $('#'+fr.y+'_'+fr.x).attr('figure'));
 
@@ -153,21 +258,25 @@
 			$('#'+fr.y+'_'+fr.x).html('');
 
 
-			// в целевую ячейку сразу ставим запрошенную фигуру
-			$('#'+to.y+'_'+to.x).html('<img src="images/' + msg.newPiece + '_'+ (playerWhite ? 'black' : 'white') +'.png" class="figure" />');
-			$('#'+to.y+'_'+to.x).attr('figure', msg.newPiece + '_' + (playerWhite ? 'black' : 'white'));
+			// в целевую ячейку сразу ставим запрошенную фигуру  // цвет выбирается относительно края, до которого дошла пешка
+			$('#'+to.y+'_'+to.x).html('<img src="images/' + msg.newPiece + '_'+ (to.y!=0 ? 'black' : 'white') +'.png" class="figure" />');
+			$('#'+to.y+'_'+to.x).attr('figure', msg.newPiece + '_' + (to.y!=0 ? 'black' : 'white'));
 			whiteTurn = !whiteTurn;		// необходим ручной переход хода
 		}
 		else{
 			// если такой ход сделать нельзя, то ругаемся
 			socket.emit('turnValidation_invalid');
 		}
-		SetGameStateInfoText();
+		if(!spectrator)
+			SetGameStateInfoText();
 	});
 
 	// обработчик сообщения о том, что игроку поставлен МАТ
 	socket.on('player_mate', function(msg) {
 		console.log(msg);
+		if(spectrator){
+			return;
+		}
 		// проверяем на МАТ
 		if(CheckCheckmate(playerWhite ? 'black' : 'white')){
 			socket.emit('turnValidation_mate');
@@ -181,6 +290,9 @@
 	// обработчик сообшения о том, что произошла ничья (в рамках данного протокола - ПАТ)
 	socket.on('player_draw', function(msg) {
 		console.log(msg);
+		if(spectrator){
+			return;
+		}
 		// проверяем на ПАТ
 		if(CheckStalemate(playerWhite ? 'black' : 'white')){
 			socket.emit('turnValidation_draw');
@@ -221,6 +333,11 @@
 			whiteTurn = !whiteTurn;
 		});
 
+		// обработчик кнопки поиска комнат, показывающий всплывающее окно
+		$('#spectrate_btn').click(function() {
+			$('#shadow').css('display','block');	// показываем всплывающее окно
+			socket.emit('roomsList_Subscribe');		// подписываемся на изменения в списке комнат
+		});
 
 		$('#find_btn').click(function(){
 			// обработчик кнопки поиска игры
@@ -228,11 +345,13 @@
 				// заменяем текст на кнопке и отправляем серверу сообщение
 				$(this).val('Stop finding');
 				socket.emit('game_find');
+				$('#spectrate_btn').hide();
 			}
 			else{
 				// заменяем текст на кнопке и отправляем серверу сообщение
 				$(this).val('Find game');
 				socket.emit('game_stopFinding');
+				$('#spectrate_btn').show();
 			}
 		});
 
@@ -820,12 +939,34 @@
 
 	// перевод координат из своего формата в общий
 	function EncodeCoordinates(x,y){
-		return {x:x, y:y};
+		var coords = {x:'Z', y:(8-Number(y))};
+		switch(Number(x)){
+			case 0: coords.x = 'A'; break;
+			case 1: coords.x = 'B'; break;
+			case 2: coords.x = 'C'; break;
+			case 3: coords.x = 'D'; break;
+			case 4: coords.x = 'E'; break;
+			case 5: coords.x = 'F'; break;
+			case 6: coords.x = 'G'; break;
+			case 7: coords.x = 'H'; break;
+		}
+		return coords;
 	}
 
 	// перевод координат из общего формата в свой
 	function DecodeCoordinates(x,y){
-		return {x:x, y:y};
+		var coords = {x:9, y:(8-Number(y))};
+		switch(x){
+			case 'A': coords.x = 0; break;
+			case 'B': coords.x = 1; break;
+			case 'C': coords.x = 2; break;
+			case 'D': coords.x = 3; break;
+			case 'E': coords.x = 4; break;
+			case 'F': coords.x = 5; break;
+			case 'G': coords.x = 6; break;
+			case 'H': coords.x = 7; break;
+		}
+		return coords;
 	}
 
 	function figureClick(){
@@ -1420,7 +1561,12 @@
 <body>
 	<div id="game_find_menu">
 		<input type="submit" value="Find game" id="find_btn"/>
+		<input type="submit" value="Spectrate" id="spectrate_btn"/>
 	</div>
+	<div class="modal" style="display:none" id="shadow">
+	</div>
+	<div id="roomsDiv" style="top:50%;left:50%;position:absolute;z-index:9002;background-color:white;opacity:0.8;"></div>
+
 	<div id="choose_menu" style="display:none">
 		<input type="radio" name="fig" value="queen"> Queen </input>
 	   	<input type="radio" name="fig" value="knight"> Knight </input>
