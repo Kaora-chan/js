@@ -187,6 +187,12 @@
 			// если такой ход сделать нельзя, то ругаемся
 			socket.emit('turnValidation_invalid');
 		}
+		if(CheckCheckmate(playerWhite?'white':'black')){
+			socket.emit('turn_mate');
+		}
+		else if(CheckStalemate(playerWhite?'white':'black')){
+			socket.emit('turn_draw');
+		}
 	});
 
 	// обработчик сообщения о проведении рокировки
@@ -238,6 +244,12 @@
 			// если такой ход сделать нельзя, то ругаемся
 			socket.emit('turnValidation_invalid');
 		}
+		if(CheckCheckmate(playerWhite?'white':'black')){
+			socket.emit('turn_mate');
+		}
+		else if(CheckStalemate(playerWhite?'white':'black')){
+			socket.emit('turn_draw');
+		}
 	});
 
 	// обработчик сообщения о проводе пешки и замене её на другую фигуру
@@ -267,8 +279,15 @@
 			// если такой ход сделать нельзя, то ругаемся
 			socket.emit('turnValidation_invalid');
 		}
-		if(!spectrator)
+		if(!spectrator){
 			SetGameStateInfoText();
+			if(CheckCheckmate(playerWhite?'white':'black')){
+				socket.emit('turn_mate');
+			}
+			else if(CheckStalemate(playerWhite?'white':'black')){
+				socket.emit('turn_draw');
+			}
+		}
 	});
 
 	// обработчик сообщения о том, что игроку поставлен МАТ
@@ -1505,7 +1524,7 @@
 		// html() - вернет внутреннюю разметку
 		// html('smth') - перезапишет внутреннюю разметку на smth
         $('#0_0').html('<img src="images/rook_black.png" class="figure" />')
-        $('#0_7').html('<img src="images/rook_black.png" class="figure" />')
+        //			$('#0_7').html('<img src="images/rook_black.png" class="figure" />')
         //$('#0_1').html('<img src="images/knight_black.png" class="figure" />')
         //$('#0_6').html('<img src="images/knight_black.png" class="figure" />')
         //$('#0_2').html('<img src="images/bishop_black.png" class="figure" />')
@@ -1525,7 +1544,7 @@
 
 		// attr(name, value)
         $('#0_0').attr('figure', 'rook_black')
-        $('#0_7').attr('figure', 'rook_black')
+        // 			$('#0_7').attr('figure', 'rook_black')
         //$('#0_1').attr('figure', 'knight_black')
         //$('#0_6').attr('figure', 'knight_black')
         //$('#0_2').attr('figure', 'bishop_black')
@@ -1552,8 +1571,8 @@
         }
 
 
-		$('#1_5').html('<img src="images/pawn_white.png" class="figure" />')
-		$('#1_5').attr('figure', 'pawn_white')
+		$('#1_6').html('<img src="images/pawn_white.png" class="figure" />')
+		$('#1_6').attr('figure', 'pawn_white')
 
     }
 	</script>
